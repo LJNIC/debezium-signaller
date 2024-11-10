@@ -1,6 +1,19 @@
 #!/bin/sh
 set -e
 
+create_filters() {
+	choice=$(gum choose $(echo "$choices" | tr '\n' ' ') "done")
+	if [ "$choice" = "done" ]; then
+		filters="$(echo "$filters" | sed 's/..$//')]"
+		echo "$filters"
+	else
+		query=$(gum input --prompt "Filter> " | sed "s/'/''/g")
+		filters="${filters}{\"data-collection\": \"${choice}\", \"filter\": \"${query}\"}, "
+		choices=$(echo "$choices" | sed "s/${choice}//")
+		create_filters
+	fi
+}
+
 save_database() {
 	printf "%s\n%s\n%s" "$DATABASE" "$USER" "$TABLE" > "$CONFIG"
 	gum style --foreground="#5edb6a" "Saved to ~/.config/signal.conf ✓"
@@ -31,9 +44,13 @@ generate_summary() {
 }
 
 build_json() {
-	json="{ \"data-collections\": [${COLLECTIONS}]"
+	json="{\"data-collections\": [${COLLECTIONS}]"
 	if [ "$TYPE" ]; then
 		json="${json}, \"type\": \"$(echo ${TYPE} | tr '[:lower:]' '[:upper:]')\" "
+	fi
+
+	if [ "$CONDITIONS" ]; then
+		json="${json}, \"additional-conditions\": ${CONDITIONS}"
 	fi
 	json="${json}}"
 	echo "$json"
@@ -54,7 +71,12 @@ SIGNAL=$(gum choose --header "What kind of signal?" "execute-snapshot" "stop-sna
 if [ "$SIGNAL" = "execute-snapshot" ] || [ "$SIGNAL" = "stop-snapshot" ]; then
 	HAS_DATA=true
 	TYPE=$(gum choose --header "What kind of snapshot?" "incremental" "blocking")
-	TABLES=$(gum choose --header "Tables:" --no-limit "acsis_hc_patients" "acsis_adt_encounters" "acsis_adt_encounter_diagnoses")	
+	TABLES=$(gum choose --header "Tables:" --no-limit "acsis_hc_patients" "acsis_adt_encounters" "acsis_adt_encounter_diagnoses")
+	if [ "$TABLES" ]; then
+		choices="$TABLES"
+		filters="["
+		CONDITIONS=$(gum confirm "Add any filters?" && create_filters)
+	fi
 	COLLECTIONS="\"$(echo "$TABLES" | tr '\n' ',' | sed 's/,/","/g' | xargs -0 basename -s ',"')"
 fi
 
@@ -78,6 +100,4 @@ fi
 generate_summary
 
 gum confirm "Send this signal to ${DATABASE}/${TABLE}?" && send_signal
-
-
 
